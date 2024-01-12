@@ -174,7 +174,12 @@ function gtm4wp_add_basic_datalayer_data( $data_layer ) {
 		$current_user = wp_get_current_user();
 
 		if ( $gtm4wp_options[ GTM4WP_OPTION_INCLUDE_USERROLE ] ) {
+			// Used to specifiy specific user types for CCIWA
 			$data_layer['visitorType'] = ( 0 === $current_user->ID ? 'visitor-logged-out' : implode( ',', $current_user->roles ) );
+            if(function_exists('gtm_visitor_type')) {
+                $data_layer['userLevel1'] = ( 0 === $current_user->ID ? 'Visitor' : gtm_visitor_type(1) );
+                $data_layer['userLevel2'] = ( 0 === $current_user->ID ? '' : gtm_visitor_type(2) );
+            }
 		}
 
 		if ( $gtm4wp_options[ GTM4WP_OPTION_INCLUDE_USEREMAIL ] ) {
