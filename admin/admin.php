@@ -511,7 +511,18 @@ function gtm4wp_sanitize_options( $options ) {
 			$newoptionvalue = '';
 		}
 
-		if ( 'include-' === substr( $optionname, 0, 8 ) ) {
+		if ( GTM4WP_OPTION_INCLUDE_VISITOR_IP_HEADER === $optionname ) {
+			if ( '' !== $newoptionvalue ) {
+				$custom_header = strtoupper( str_replace( '-', '_', $newoptionvalue ) );
+				if ( preg_match( '/[A-Z0-9_]+/', $custom_header ) ) {
+					$output[ $optionname ] = $custom_header;
+				} else {
+					$output[ $optionname ] = '';
+				}
+			} else {
+				$output[ $optionname ] = $newoptionvalue;
+			}
+		} elseif ( 'include-' === substr( $optionname, 0, 8 ) ) {
 			// "include" settings.
 			$output[ $optionname ] = (bool) $newoptionvalue;
 
@@ -733,7 +744,13 @@ function gtm4wp_admin_init() {
 		GTM4WP_ADMIN_GROUP_GENERAL,
 		array(
 			'label_for'   => GTM4WP_ADMIN_GROUP_CONTAINERON,
-			'description' => gtm4wp_safe_admin_html( 'Turning OFF the Google Tag Manager container itself will remove both the head and the body part of the container code but leave data layer codes working.<br/>This should be only used in specific cases where you need to place the container code manually or using another tool.', 'duracelltomi-google-tag-manager' ),
+			'description' => gtm4wp_safe_admin_html(
+				__(
+					'Turning OFF the Google Tag Manager container itself will remove both the head and the body part of the container code but leave data layer codes working.<br/>
+					This should be only used in specific cases where you need to place the container code manually or using another tool.',
+					'duracelltomi-google-tag-manager'
+				)
+			),
 		)
 	);
 

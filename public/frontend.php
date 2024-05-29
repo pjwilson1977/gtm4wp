@@ -48,10 +48,10 @@ $GLOBALS['gtm4wp_container_code_written'] = false;
  *
  * @since 1.2
  */
+$GLOBALS['gtm4wp_datalayer_name'] = $GLOBALS['gtm4wp_options'][ GTM4WP_OPTION_DATALAYER_NAME ];
+
 if ( empty( $GLOBALS['gtm4wp_options'] ) || ( '' === $GLOBALS['gtm4wp_options'][ GTM4WP_OPTION_DATALAYER_NAME ] ) ) {
 	$GLOBALS['gtm4wp_datalayer_name'] = 'dataLayer';
-} else {
-	$GLOBALS['gtm4wp_datalayer_name'] = $GLOBALS['gtm4wp_options'][ GTM4WP_OPTION_DATALAYER_NAME ];
 }
 
 /**
@@ -87,36 +87,48 @@ if ( ! function_exists( 'gtm4wp_amp_running' ) ) {
 }
 
 /**
- * Original copyright:
- * By Grant Burton @ BURTONTECH.COM
+ * Returns the IP address of the user either from REMOVE_ADDR server variable or a custom HTTP header specified in the parameter of the funcion.
  *
- * Code improved by Thomas Geiger
+ * Originally this function iterated through many commonly used custom headers however since they are unprotected, one could send a bogus
+ * IP address for tracking purposes. Therefore function has been changed to only use the safe server variable and a user option to allow one
+ * specific custom HTTP header.
+ *
+ * The function will translate the given custom header to a PHP server varibale, no need to directly input the PHP form of the header.
+ * If custom the header is not found, the function will fall back to REMOTE_ADDR.
+ *
+ * @param string $use_custom_header A custom HTTP header to use instead of the default REMOTE_ADDR server variable.
+ * @return string IP address of the user if found, empty string otherwise.
  */
-function gtm4wp_get_user_ip() {
-	if ( ! empty( $_SERVER['HTTP_X_FORWARDED_FOR'] ) ) {
-		foreach ( explode( ',', sanitize_text_field( wp_unslash( $_SERVER['HTTP_X_FORWARDED_FOR'] ) ) ) as $ip ) {
-			if ( filter_var( $ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE ) !== false ) {
+function gtm4wp_get_user_ip( $use_custom_header = '' ) {
+	$custom_header = '';
+
+	if ( '' !== $use_custom_header ) {
+		$custom_header = strtoupper( str_replace( '-', '_', $use_custom_header ) );
+		if ( preg_match( '/[A-Z0-9_]+/', $custom_header ) ) {
+			$custom_header = 'HTTP_' . $custom_header;
+		} else {
+			$custom_header = '';
+		}
+	}
+
+	if ( ( '' !== $custom_header ) && ( ! empty( $_SERVER[ $custom_header ] ) ) ) {
+		if ( 'HTTP_X_FORWARDED_FOR' === $custom_header ) {
+			// X-Forwarded-For is a comma+space separated list of IPs.
+			foreach ( explode( ',', sanitize_text_field( wp_unslash( $_SERVER[ $custom_header ] ) ) ) as $ip ) {
+				if ( filter_var( $ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE ) !== false ) {
+					return $ip;
+				}
+			}
+		} else {
+			$ip = filter_var( wp_unslash( $_SERVER[ $custom_header ] ), FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE );
+			if ( false !== $ip ) {
 				return $ip;
 			}
 		}
 	}
 
-	$possible_ip_variables = array(
-		'HTTP_CLIENT_IP',
-		'HTTP_X_FORWARDED',
-		'HTTP_X_CLUSTER_CLIENT_IP',
-		'HTTP_FORWARDED_FOR',
-		'HTTP_FORWARDED',
-		'REMOTE_ADDR',
-	);
-
-	foreach ( $possible_ip_variables as $one_ip_variable ) {
-		if ( ! empty( $_SERVER[ $one_ip_variable ] ) ) {
-			$ip = filter_var( wp_unslash( $_SERVER[ $one_ip_variable ] ), FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE );
-			if ( false !== $ip ) {
-				return $ip;
-			}
-		}
+	if ( isset( $_SERVER['REMOTE_ADDR'] ) ) {
+		return filter_var( wp_unslash( $_SERVER['REMOTE_ADDR'] ), FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE );
 	}
 
 	return '';
@@ -163,10 +175,10 @@ function gtm4wp_add_basic_datalayer_data( $data_layer ) {
 	}
 
 	if ( $gtm4wp_options[ GTM4WP_OPTION_INCLUDE_LOGGEDIN ] ) {
+		$data_layer['visitorLoginState'] = 'logged-out';
+		
 		if ( is_user_logged_in() ) {
 			$data_layer['visitorLoginState'] = 'logged-in';
-		} else {
-			$data_layer['visitorLoginState'] = 'logged-out';
 		}
 	}
 
@@ -204,7 +216,7 @@ function gtm4wp_add_basic_datalayer_data( $data_layer ) {
 	}
 
 	if ( $gtm4wp_options[ GTM4WP_OPTION_INCLUDE_VISITOR_IP ] ) {
-		$data_layer['visitorIP'] = esc_js( gtm4wp_get_user_ip() );
+		$data_layer['visitorIP'] = esc_js( gtm4wp_get_user_ip( $gtm4wp_options[ GTM4WP_OPTION_INCLUDE_VISITOR_IP_HEADER ] ) );
 	}
 
 	if ( $gtm4wp_options[ GTM4WP_OPTION_INCLUDE_POSTTITLE ] ) {
@@ -386,10 +398,10 @@ function gtm4wp_add_basic_datalayer_data( $data_layer ) {
 		$data_layer['siteSearchFrom'] = '';
 		if ( ! empty( $_SERVER['HTTP_REFERER'] ) ) {
 			$referer_url_parts = explode( '?', esc_url_raw( wp_unslash( $_SERVER['HTTP_REFERER'] ) ) );
+			$data_layer['siteSearchFrom'] = $referer_url_parts[0];
+			
 			if ( count( $referer_url_parts ) > 1 ) {
 				$data_layer['siteSearchFrom'] = $referer_url_parts[0] . '?' . rawurlencode( $referer_url_parts[1] );
-			} else {
-				$data_layer['siteSearchFrom'] = $referer_url_parts[0];
 			}
 		}
 		$data_layer['siteSearchResults'] = $wp_query->post_count;
@@ -514,12 +526,13 @@ function gtm4wp_add_basic_datalayer_data( $data_layer ) {
 			$data_layer['geoLongitude']   = esc_js( __( '(no geo data available)', 'duracelltomi-google-tag-manager' ) );
 		}
 
-		$client_ip = gtm4wp_get_user_ip();
+		$client_ip = gtm4wp_get_user_ip( $gtm4wp_options[ GTM4WP_OPTION_INCLUDE_VISITOR_IP_HEADER ] );
 
 		if ( '' !== $client_ip ) {
 			if ( $gtm4wp_options[ GTM4WP_OPTION_INCLUDE_WEATHER ] ) {
 				$weatherdata = get_transient( 'gtm4wp-weatherdata-' . esc_attr( $client_ip ) );
-
+				$data_layer['weatherDataStatus'] = 'No weather data in cache (' . esc_attr( $client_ip ) . ')';
+				
 				if ( false !== $weatherdata ) {
 					$data_layer['weatherCategory']        = $weatherdata->weather[0]->main;
 					$data_layer['weatherDescription']     = $weatherdata->weather[0]->description;
@@ -529,8 +542,6 @@ function gtm4wp_add_basic_datalayer_data( $data_layer ) {
 					$data_layer['weatherWindDeg']         = ( isset( $weatherdata->wind->deg ) ? $weatherdata->wind->deg : '' );
 					$data_layer['weatherFullWeatherData'] = $weatherdata;
 					$data_layer['weatherDataStatus']      = 'Read from cache';
-				} else {
-					$data_layer['weatherDataStatus'] = 'No weather data in cache (' . esc_attr( $client_ip ) . ')';
 				}
 			}
 
@@ -583,7 +594,7 @@ function gtm4wp_wp_loaded() {
 		( $gtm4wp_options[ GTM4WP_OPTION_INCLUDE_WEATHER ] || $gtm4wp_options[ GTM4WP_OPTION_INCLUDE_MISCGEO ] )
 		&& ( ! $blocking_cookie )
 	) {
-		$client_ip = gtm4wp_get_user_ip();
+		$client_ip = gtm4wp_get_user_ip( $gtm4wp_options[ GTM4WP_OPTION_INCLUDE_VISITOR_IP_HEADER ] );
 		$geodata   = get_transient( 'gtm4wp-geodata-' . esc_attr( $client_ip ) );
 
 		if ( false === $geodata ) {
@@ -1034,9 +1045,11 @@ function gtm4wp_wp_header_begin( $echo = true ) {
 	do_action( GTM4WP_WPACTION_AFTER_DATALAYER );
 
 	$output_container_code = true;
-	if ( ( GTM4WP_PLACEMENT_OFF === $gtm4wp_options[ GTM4WP_OPTION_GTM_PLACEMENT ] ) && ( ! $no_console_log ) ) {
+	if ( GTM4WP_PLACEMENT_OFF === $gtm4wp_options[ GTM4WP_OPTION_GTM_PLACEMENT ] ) {
 		$output_container_code = false;
+	}
 
+	if ( ! $no_console_log && ! $output_container_code ) {
 		echo '
 <script' . ( $has_html5_support ? '' : ' type="text/javascript"' ) . ( $add_cookiebot_ignore ? ' data-cookieconsent="ignore"' : '' ) . '>
 	console.warn && console.warn("[GTM4WP] Google Tag Manager container code placement set to OFF !!!");
@@ -1236,7 +1249,7 @@ function gtm4wp_fire_additional_datalayer_pushes() {
 
 		if ( array_key_exists( 'datalayer_object', $one_event ) ) {
 			$datalayer_push_code .= '
-	' . esc_js( $gtm4wp_datalayer_name ) . '.push(' . wp_json_encode( $one_event['datalayer_object'], JSON_UNESCAPED_UNICODE | JSON_NUMERIC_CHECK ) . ');';
+	' . esc_js( $gtm4wp_datalayer_name ) . '.push(' . wp_json_encode( $one_event['datalayer_object'], JSON_UNESCAPED_UNICODE ) . ');';
 		}
 
 		if ( array_key_exists( 'js_after', $one_event ) ) {

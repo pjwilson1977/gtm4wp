@@ -11,6 +11,7 @@
 define( 'GTM4WP_WPFILTER_EEC_PRODUCT_ARRAY', 'gtm4wp_eec_product_array' );
 define( 'GTM4WP_WPFILTER_EEC_CART_ITEM', 'gtm4wp_eec_cart_item' );
 define( 'GTM4WP_WPFILTER_EEC_ORDER_ITEM', 'gtm4wp_eec_order_item' );
+define( 'GTM4WP_WPFILTER_EEC_ORDER_DATA', 'gtm4wp_eec_order_data' );
 define( 'GTM4WP_WPFILTER_ECC_PURCHASE_DATALAYER', 'gtm4wp_purchase_datalayer' );
 define( 'GTM4WP_WPFILTER_EEC_DATALAYER_PAGELOAD', 'gtm4wp_woocommerce_datalayer_on_pageload' );
 
@@ -218,6 +219,11 @@ function gtm4wp_woocommerce_get_raw_order_datalayer( $order, $order_items ) {
 		return $order_data;
 	}
 
+	$billing_email_hash = gtm4wp_normalize_and_hash_email_address( 'sha256', $order->get_billing_email() );
+	$billing_first_hash = gtm4wp_normalize_and_hash( 'sha256', $order->get_billing_first_name(), false );
+	$billing_last_hash  = gtm4wp_normalize_and_hash( 'sha256', $order->get_billing_last_name(), false );
+	$billing_phone_hash = gtm4wp_normalize_and_hash( 'sha256', $order->get_billing_phone(), true );
+
 	$order_data = array(
 		'attributes' => array(
 			'date'                 => $order->get_date_created()->date( 'c' ),
@@ -251,18 +257,22 @@ function gtm4wp_woocommerce_get_raw_order_datalayer( $order, $order_items ) {
 			'id'       => $order->get_customer_id(),
 
 			'billing'  => array(
-				'first_name' => esc_js( $order->get_billing_first_name() ),
-				'last_name'  => esc_js( $order->get_billing_last_name() ),
-				'company'    => esc_js( $order->get_billing_company() ),
-				'address_1'  => esc_js( $order->get_billing_address_1() ),
-				'address_2'  => esc_js( $order->get_billing_address_2() ),
-				'city'       => esc_js( $order->get_billing_city() ),
-				'state'      => esc_js( $order->get_billing_state() ),
-				'postcode'   => esc_js( $order->get_billing_postcode() ),
-				'country'    => esc_js( $order->get_billing_country() ),
-				'email'      => esc_js( $order->get_billing_email() ),
-				'emailhash'  => esc_js( hash( 'sha256', $order->get_billing_email() ) ),
-				'phone'      => esc_js( $order->get_billing_phone() ),
+				'first_name'      => esc_js( $order->get_billing_first_name() ),
+				'first_name_hash' => esc_js( $billing_first_hash ),
+				'last_name'       => esc_js( $order->get_billing_last_name() ),
+				'last_name_hash'  => esc_js( $billing_last_hash ),
+				'company'         => esc_js( $order->get_billing_company() ),
+				'address_1'       => esc_js( $order->get_billing_address_1() ),
+				'address_2'       => esc_js( $order->get_billing_address_2() ),
+				'city'            => esc_js( $order->get_billing_city() ),
+				'state'           => esc_js( $order->get_billing_state() ),
+				'postcode'        => esc_js( $order->get_billing_postcode() ),
+				'country'         => esc_js( $order->get_billing_country() ),
+				'email'           => esc_js( $order->get_billing_email() ),
+				'emailhash'       => esc_js( $billing_email_hash ), // deprecated.
+				'email_hash'      => esc_js( $billing_email_hash ),
+				'phone'           => esc_js( $order->get_billing_phone() ),
+				'phone_hash'      => esc_js( $billing_phone_hash ),
 			),
 
 			'shipping' => array(
@@ -281,7 +291,14 @@ function gtm4wp_woocommerce_get_raw_order_datalayer( $order, $order_items ) {
 		'items'      => $order_items,
 	);
 
-	return $order_data;
+	/**
+	 * Filters the orderData array before using it for tracking.
+	 * Can be used to add custom order or even product data into the data layer.
+	 *
+	 * @param array  $order_data An associative array containing all data (head data and products) about the currently placed order.
+	 * @param WC_Order $order       The WooCommerce order object.
+	 */
+	return apply_filters( GTM4WP_WPFILTER_EEC_ORDER_DATA, $order_data, $order );
 }
 /**
  * Takes a WooCommerce order and order items and generates the standard/classic and
@@ -338,8 +355,9 @@ function gtm4wp_woocommerce_get_purchase_datalayer( $order, $order_items = null 
 	 * Can be used to add custom data to the data layer when the purhcase ecommerce action is included.
 	 *
 	 * @param array $data_layer An associative array containing the full data layer including purchase header attributes.
+	 * @param WC_Order $order The WooCommerce order that needs to be transformed into an enhanced ecommerce data layer.
 	 */
-	return apply_filters( GTM4WP_WPFILTER_ECC_PURCHASE_DATALAYER, $data_layer );
+	return apply_filters( GTM4WP_WPFILTER_ECC_PURCHASE_DATALAYER, $data_layer, $order );
 }
 
 /**
@@ -380,7 +398,7 @@ function gtm4wp_woocommerce_datalayer_filter_items( $data_layer ) {
 			$data_layer['customerBillingPostcode']  = $woo_customer->get_billing_postcode();
 			$data_layer['customerBillingCountry']   = $woo_customer->get_billing_country();
 			$data_layer['customerBillingEmail']     = $woo_customer->get_billing_email();
-			$data_layer['customerBillingEmailHash'] = hash( 'sha256', $woo_customer->get_billing_email() );
+			$data_layer['customerBillingEmailHash'] = gtm4wp_normalize_and_hash_email_address( 'sha256', $woo_customer->get_billing_email() );
 			$data_layer['customerBillingPhone']     = $woo_customer->get_billing_phone();
 
 			$data_layer['customerShippingFirstName'] = $woo_customer->get_shipping_first_name();
@@ -1240,6 +1258,7 @@ function gtm4wp_woocommerce_get_product_list_item_extra_tag( $product, $listtype
 			'productlink'    => $permalink,
 			'item_list_name' => $list_name,
 			'index'          => (int) $itemix + ( $posts_per_page * ( $paged - 1 ) ),
+			'product_type'   => $product->get_type(),
 		),
 		'productlist'
 	);
