@@ -250,6 +250,48 @@ class Test_JSON_Encode_Script_Context extends TestCase {
 	}
 
 	/**
+	 * Regression test for PR #432: esc_attr entities survive full pipeline
+	 *
+	 * esc_attr() converts " to &quot;, which htmlspecialchars_decode() decodes
+	 * back to " unless JSON_HEX_AMP prevents entity formation.
+	 */
+	public function test_esc_attr_entity_survives_full_pipeline() {
+		$raw_input     = 'test"breakout';
+		$after_esc_attr = esc_attr( $raw_input ); // test&quot;breakout
+
+		$data   = array( 'siteSearchTerm' => $after_esc_attr );
+		$json   = wp_json_encode(
+			$data,
+			JSON_UNESCAPED_UNICODE | JSON_NUMERIC_CHECK | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_QUOT | JSON_HEX_APOS
+		);
+		$output = htmlspecialchars_decode( $json );
+
+		$decoded = json_decode( $output, true );
+		$this->assertNotNull( $decoded, 'esc_attr entity must not break JSON after htmlspecialchars_decode' );
+	}
+
+	/**
+	 * Regression test for PR #432: XSS exploit payload via esc_attr pipeline
+	 *
+	 * Verifies the actual exploit `/?s=%22%7D%3Balert(1)%2F%2F` is neutralised.
+	 */
+	public function test_xss_payload_via_esc_attr_pipeline() {
+		$raw_input     = '"};alert(1)//';
+		$after_esc_attr = esc_attr( $raw_input );
+
+		$data   = array( 'siteSearchTerm' => $after_esc_attr );
+		$json   = wp_json_encode(
+			$data,
+			JSON_UNESCAPED_UNICODE | JSON_NUMERIC_CHECK | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_QUOT | JSON_HEX_APOS
+		);
+		$output = htmlspecialchars_decode( $json );
+
+		$decoded = json_decode( $output, true );
+		$this->assertNotNull( $decoded, 'XSS payload via esc_attr must not break JSON' );
+		$this->assertStringNotContainsString( '";alert', $output, 'Must not contain unescaped XSS payload' );
+	}
+
+	/**
 	 * Test: Long payload performance
 	 *
 	 * Ensures the fix handles large search terms efficiently
