@@ -15,7 +15,7 @@ define( 'GTM4WP_WPFILTER_EEC_ORDER_DATA', 'gtm4wp_eec_order_data' );
 define( 'GTM4WP_WPFILTER_ECC_PURCHASE_DATALAYER', 'gtm4wp_purchase_datalayer' );
 define( 'GTM4WP_WPFILTER_EEC_DATALAYER_PAGELOAD', 'gtm4wp_woocommerce_datalayer_on_pageload' );
 
-require_once dirname( __FILE__ ) . '/ecommerce-generic.php';
+require_once __DIR__ . '/ecommerce-generic.php';
 
 $gtm4wp_product_counter   = 0;
 $gtm4wp_last_widget_title = 'Sidebar Products';
@@ -736,7 +736,6 @@ function gtm4wp_woocommerce_datalayer_filter_items( $data_layer ) {
 				$after_purchase_dl_push
 			);
 
-
 			if ( ! $do_not_flag_tracked_order ) {
 				$order->update_meta_data( '_ga_tracked', 1 );
 				$order->save();
@@ -855,9 +854,9 @@ function gtm4wp_woocommerce_datalayer_filter_items( $data_layer ) {
  * @return void
  */
 function gtm4wp_woocommerce_thankyou( $order_id ) {
-	global $gtm4wp_options, $gtm4wp_woocommerce_purchase_data_pushed;
+	global $gtm4wp_options, $gtm4wp_woocommerce_purchase_data_pushed, $gtm4wp_datalayer_name;
 
-	if ( function_exists('is_order_received_page') && is_order_received_page() ) {
+	if ( function_exists( 'is_order_received_page' ) && is_order_received_page() ) {
 		return;
 	}
 
@@ -931,6 +930,19 @@ function gtm4wp_woocommerce_thankyou( $order_id ) {
 		$data_layer = array_merge(
 			$data_layer,
 			$purchase_data_layer
+		);
+
+		$script_tag = '
+' . gtm4wp_generate_script_opening_tag() . '
+	window.' . esc_js( $gtm4wp_datalayer_name ) . ' = window.' . esc_js( $gtm4wp_datalayer_name ) . ' || [];
+	window.' . esc_js( $gtm4wp_datalayer_name ) . '.push(' . wp_json_encode( $data_layer ) . ');
+</script>';
+
+		echo htmlspecialchars_decode( //phpcs:ignore
+			wp_kses(
+				$script_tag,
+				gtm4wp_get_sanitize_script_block_rules()
+			)
 		);
 
 		if ( ! $do_not_flag_tracked_order ) {
@@ -1231,7 +1243,7 @@ function gtm4wp_woocommerce_after_template_part( $template_name ) {
 			esc_attr( wp_json_encode( $eec_product_array ) )
 		);
 
-		$gtm4wp_product_counter++;
+		++$gtm4wp_product_counter;
 
 		$productitem = str_replace( 'href="', $productlink_with_data, $productitem );
 	}
@@ -1453,7 +1465,7 @@ function gtm4wp_woocommerce_grouped_product_list_column_label( $labelvalue, $pro
 		'groupedproductlist'
 	);
 
-	$gtm4wp_grouped_product_ix++;
+	++$gtm4wp_grouped_product_ix;
 
 	if ( ! isset( $eec_product_array['item_brand'] ) ) {
 		$eec_product_array['item_brand'] = '';
