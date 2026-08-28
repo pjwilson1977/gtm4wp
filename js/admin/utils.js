@@ -1,0 +1,514 @@
+/**
+ * Pure helper functions of the GTM4WP admin app.
+ */
+
+/**
+ * Coerces a raw stored option value into the shape the UI control expects.
+ *
+ * @param {Object} field Field description from the bootstrap data.
+ * @param {*}      raw   Raw stored value.
+ * @return {*} Value for the UI control.
+ */
+export function coerceValue( field, raw ) {
+	switch ( field.type ) {
+		case 'checkbox':
+			return Boolean( raw );
+
+		case 'integer':
+			return Number.isFinite( Number( raw ) ) ? Number( raw ) : 0;
+
+		case 'select':
+			return String( raw ?? '' );
+
+		case 'multiselect':
+			if ( Array.isArray( raw ) ) {
+				return raw.filter( ( entry ) => '' !== entry );
+			}
+			return String( raw ?? '' )
+				.split( ',' )
+				.filter( ( entry ) => '' !== entry );
+
+		case 'table': {
+			const columns = Array.isArray( field.columns ) ? field.columns : [];
+			const rows = Array.isArray( raw ) ? raw : [];
+
+			return rows.map( ( row ) => {
+				const entry = {};
+
+				columns.forEach( ( column ) => {
+					entry[ column.key ] = String(
+						( row ? row[ column.key ] : '' ) ?? ''
+					);
+				} );
+
+				return entry;
+			} );
+		}
+
+		default:
+			return String( raw ?? '' );
+	}
+}
+
+/**
+ * Builds the option key => UI value map for every field of every module,
+ * coercing each raw value into the shape its control expects. Used both for
+ * the initial load (no overrides) and after an import, where the freshly
+ * stored values returned by the server replace the current UI state.
+ *
+ * @param {Array}  modules   Module descriptions from the bootstrap data.
+ * @param {Object} overrides Optional option key => raw value map that takes
+ *                           precedence over each field's own `value`.
+ * @return {Object} Option key => coerced UI value map.
+ */
+export function buildValueMap( modules, overrides = {} ) {
+	const values = {};
+
+	modules.forEach( ( module ) => {
+		module.fields.forEach( ( field ) => {
+			const raw = Object.prototype.hasOwnProperty.call(
+				overrides,
+				field.key
+			)
+				? overrides[ field.key ]
+				: field.value;
+
+			values[ field.key ] = coerceValue( field, raw );
+		} );
+	} );
+
+	return values;
+}
+
+/**
+ * Splits a multiselect field's choices into the labelled sections its schema
+ * declares (`field.sections`, from the Field's `choice_sections`), so a long
+ * checkbox list can be rendered as several titled groups.
+ *
+ * The stored value is a flat list either way: sections are presentation only,
+ * and a section carries choice KEYS, never labels, so the labels keep their
+ * single definition in `field.choices`.
+ *
+ * Two rules exist so that no choice can disappear from the screen — an option an
+ * admin cannot see is an option they cannot set, and nothing would report it:
+ * a key no section claims is returned in a trailing unlabelled section, and a key
+ * a section claims but `choices` does not define is skipped.
+ *
+ * Lives here rather than in FieldControl for the same reason `groupsWithFields`
+ * does: it is arithmetic over the schema, and it is worth testing without a DOM.
+ *
+ * @param {Object} field Field description from the bootstrap data.
+ * @return {Array} `{ label, entries: [ [ value, label ], … ] }` list, in declared
+ *                 order. Sections that end up empty are dropped; a field with no
+ *                 sections yields a single unlabelled one holding every choice.
+ */
+export function choiceSections( field ) {
+	const choices = field && field.choices ? field.choices : {};
+	const entries = Object.entries( choices );
+	const declared =
+		field && Array.isArray( field.sections ) ? field.sections : [];
+
+	if ( 0 === declared.length ) {
+		return entries.length > 0 ? [ { label: '', entries } ] : [];
+	}
+
+	const claimed = new Set();
+	const sections = [];
+
+	declared.forEach( ( section ) => {
+		const keys =
+			section && Array.isArray( section.choices ) ? section.choices : [];
+		const sectionEntries = [];
+
+		keys.forEach( ( key ) => {
+			if (
+				! Object.prototype.hasOwnProperty.call( choices, key ) ||
+				claimed.has( key )
+			) {
+				return;
+			}
+
+			claimed.add( key );
+			sectionEntries.push( [ key, choices[ key ] ] );
+		} );
+
+		if ( sectionEntries.length > 0 ) {
+			sections.push( {
+				label: String( ( section && section.label ) ?? '' ),
+				entries: sectionEntries,
+			} );
+		}
+	} );
+
+	const unclaimed = entries.filter( ( [ key ] ) => ! claimed.has( key ) );
+
+	if ( unclaimed.length > 0 ) {
+		sections.push( { label: '', entries: unclaimed } );
+	}
+
+	return sections;
+}
+
+/**
+ * Whether a field's control should be disabled because the field it depends on
+ * (`field.depends_on`, an option key) is currently off/empty. Fields without a
+ * dependency are never disabled by this. Mirrors the per-column `depends_on`
+ * handling in TableControl at the whole-field level.
+ *
+ * @param {Object} field  Field description from the bootstrap data.
+ * @param {Object} values Option key => current UI value map.
+ * @return {boolean} True when the control must be disabled.
+ */
+export function isFieldDisabled( field, values ) {
+	const dependency = field && field.depends_on;
+
+	if ( ! dependency ) {
+		return false;
+	}
+
+	return ! ( values && values[ dependency ] );
+}
+
+/**
+ * Whether a table cell is read-only because its value is controlled outside the
+ * settings screen — a `GTM4WP_HARDCODED_*` constant in wp-config.php fixing part
+ * of the container setup. A locked row set locks every cell of the table: with
+ * the row list itself decided by wp-config.php, an edit to any other cell has no
+ * row of the admin's own left to be saved into.
+ *
+ * @param {Object} field  Field description from the bootstrap data.
+ * @param {Object} column Column description of that field.
+ * @return {boolean} True when the cell must be rendered read-only.
+ */
+export function isCellLocked( field, column ) {
+	return (
+		Boolean( field && field.rows_locked ) ||
+		Boolean( column && column.readonly )
+	);
+}
+
+/**
+ * Builds the file name a settings export is downloaded as. The date is
+ * injected so the value is deterministic and testable.
+ *
+ * @param {Date} date Date used for the file name stamp.
+ * @return {string} File name, e.g. `gtm4wp-settings-2026-07-15.json`.
+ */
+export function exportFilename( date = new Date() ) {
+	const stamp = ( date instanceof Date ? date : new Date() )
+		.toISOString()
+		.slice( 0, 10 );
+
+	return `gtm4wp-settings-${ stamp }.json`;
+}
+
+/**
+ * Returns the map of values that differ between the initial and the
+ * current state, ready to be submitted to the REST endpoint.
+ *
+ * @param {Object} initialValues Option key => value map at load/save time.
+ * @param {Object} currentValues Option key => value map of the UI state.
+ * @return {Object} Only the changed entries.
+ */
+export function changedValues( initialValues, currentValues ) {
+	const changed = {};
+
+	Object.keys( currentValues ).forEach( ( key ) => {
+		const a = JSON.stringify( initialValues[ key ] );
+		const b = JSON.stringify( currentValues[ key ] );
+
+		if ( a !== b ) {
+			changed[ key ] = currentValues[ key ];
+		}
+	} );
+
+	return changed;
+}
+
+/**
+ * Resolves a deep link into the settings screen: `?<queryArg>=<option key>`,
+ * where the query argument name is the one the server put in the bootstrap data
+ * (`focusArg`), so the contract has a single definition on our side.
+ *
+ * The address is the option key alone. Which module and which group tab hold
+ * that option is looked up here, in the schema the server just sent, so a link
+ * printed in an admin notice or in the documentation keeps working when a field
+ * is regrouped or moves to another module.
+ *
+ * Nothing from the URL is returned: the key is matched against the known fields
+ * and it is the FIELD's own values that come back, so a hand-crafted URL can
+ * only ever select an existing field or nothing at all.
+ *
+ * @param {Array}  modules  Module descriptions from the bootstrap data.
+ * @param {string} search   Query string, e.g. `window.location.search`.
+ * @param {string} queryArg Name of the query argument carrying the option key.
+ * @return {?Object} `{ moduleId, groupId, fieldKey }`, or null when there is no
+ *                   deep link or it names an option this install does not have.
+ */
+export function focusTarget( modules, search, queryArg ) {
+	if ( ! queryArg ) {
+		return null;
+	}
+
+	const wanted = new URLSearchParams( String( search ?? '' ) ).get(
+		queryArg
+	);
+
+	if ( ! wanted ) {
+		return null;
+	}
+
+	for ( const module of modules ?? [] ) {
+		const field = ( module.fields ?? [] ).find(
+			( candidate ) => candidate.key === wanted
+		);
+
+		if ( field ) {
+			return {
+				moduleId: module.id,
+				groupId: field.group,
+				fieldKey: field.key,
+			};
+		}
+	}
+
+	return null;
+}
+
+/**
+ * The groups of a module that actually hold fields, each with its own fields
+ * attached. Groups are declared independently of fields, so a declared group
+ * can end up empty; those are dropped rather than shown as an empty tab.
+ *
+ * Lives here rather than in ModulePanel because the panel is not the only thing
+ * that has to know which tab a module opens on - the URL does too, and two
+ * copies of this arithmetic would disagree the first time either changed.
+ *
+ * @param {Object} module Module description from the bootstrap data.
+ * @return {Array} Groups holding at least one field, in declared order.
+ */
+export function groupsWithFields( module ) {
+	const groups = module && module.groups ? module.groups : [];
+	const fields = module && module.fields ? module.fields : [];
+
+	return groups
+		.map( ( group ) => ( {
+			...group,
+			fields: fields.filter( ( field ) => field.group === group.id ),
+		} ) )
+		.filter( ( group ) => group.fields.length > 0 );
+}
+
+/**
+ * The group a module opens on, or null when it has no tab bar at all: a module
+ * with a single populated group renders its fields flat, so naming that group
+ * in the URL would promise a tab the screen does not have.
+ *
+ * @param {Object} module Module description from the bootstrap data.
+ * @return {?string} Group id, or null.
+ */
+export function defaultGroupId( module ) {
+	const groups = groupsWithFields( module );
+
+	return groups.length > 1 ? groups[ 0 ].id : null;
+}
+
+/**
+ * The location fragment for a position on the screen: `#<module>/<group>`, or
+ * `#<module>` for a module with no tabs.
+ *
+ * A fragment rather than a query argument because this is in-page position, not
+ * a request: it never reaches the server, and it cannot collide with anything
+ * WordPress puts in the query string of its own admin URLs.
+ *
+ * @param {string}  moduleId Active module id.
+ * @param {?string} groupId  Active group id, if the module has tabs.
+ * @return {string} Fragment including the leading `#`, or '' when there is no
+ *                  module to point at.
+ */
+export function locationHash( moduleId, groupId ) {
+	if ( ! moduleId ) {
+		return '';
+	}
+
+	return groupId ? `#${ moduleId }/${ groupId }` : `#${ moduleId }`;
+}
+
+/**
+ * Resolves a `#<module>/<group>` fragment back to a position on the screen.
+ *
+ * Every value returned comes from the schema, never from the fragment, so a
+ * hand-edited URL can only ever name a real module and a real tab or be
+ * rejected outright. A module that no longer exists yields null (open normally);
+ * a group that no longer holds fields falls back to the module's own first tab,
+ * because the module part of the bookmark is still good information.
+ *
+ * @param {Array}  modules Module descriptions from the bootstrap data.
+ * @param {string} hash    Fragment, e.g. `window.location.hash`.
+ * @return {?Object} `{ moduleId, groupId }`, or null.
+ */
+export function locationTarget( modules, hash ) {
+	const path = String( hash ?? '' ).replace( /^#/, '' );
+
+	if ( '' === path ) {
+		return null;
+	}
+
+	const wanted = path.split( '/' );
+	const module = ( modules ?? [] ).find(
+		( candidate ) => candidate.id === wanted[ 0 ]
+	);
+
+	if ( ! module ) {
+		return null;
+	}
+
+	const wantedGroup = wanted[ 1 ];
+	const groups = groupsWithFields( module );
+	const group =
+		groups.length > 1
+			? groups.find( ( candidate ) => candidate.id === wantedGroup )
+			: undefined;
+
+	return {
+		moduleId: module.id,
+		groupId: group ? group.id : defaultGroupId( module ),
+	};
+}
+
+/**
+ * Where the screen opens, in precedence order: a `?gtm4wp-focus=` deep link
+ * from an admin notice, then a `#module/tab` bookmark, then the first module.
+ *
+ * The notice wins because it was clicked deliberately and says something about
+ * the site's current state, whereas a bookmark only says where somebody was
+ * standing last time.
+ *
+ * @param {Array}  modules  Module descriptions from the bootstrap data.
+ * @param {Object} location Location-like object with `search` and `hash`.
+ * @param {string} focusArg Name of the deep-link query argument.
+ * @return {Object} `{ moduleId, groupId, focusFieldKey }`; ids are '' / null
+ *                  when there is nothing to show.
+ */
+export function openingPosition( modules, location, focusArg ) {
+	const list = modules ?? [];
+	const focused = focusTarget( list, location.search, focusArg );
+
+	if ( focused ) {
+		const module = list.find(
+			( candidate ) => candidate.id === focused.moduleId
+		);
+		const groups = groupsWithFields( module );
+		const linked = groups.some( ( group ) => group.id === focused.groupId );
+
+		return {
+			moduleId: focused.moduleId,
+			groupId:
+				linked && groups.length > 1
+					? focused.groupId
+					: defaultGroupId( module ),
+			focusFieldKey: focused.fieldKey,
+		};
+	}
+
+	const bookmarked = locationTarget( list, location.hash );
+
+	if ( bookmarked ) {
+		return { ...bookmarked, focusFieldKey: null };
+	}
+
+	return {
+		moduleId: list.length > 0 ? list[ 0 ].id : '',
+		groupId: list.length > 0 ? defaultGroupId( list[ 0 ] ) : null,
+		focusFieldKey: null,
+	};
+}
+
+/**
+ * Whether a module matches a search term: its title or any field label /
+ * description contains the term (case insensitive).
+ *
+ * @param {Object} module Module description from the bootstrap data.
+ * @param {string} term   Search term.
+ * @return {boolean} True when the module should stay visible.
+ */
+export function moduleMatchesSearch( module, term ) {
+	const needle = term.trim().toLowerCase();
+
+	if ( '' === needle ) {
+		return true;
+	}
+
+	if ( module.title.toLowerCase().includes( needle ) ) {
+		return true;
+	}
+
+	return module.fields.some(
+		( field ) =>
+			field.label.toLowerCase().includes( needle ) ||
+			stripTags( field.description ).toLowerCase().includes( needle )
+	);
+}
+
+/**
+ * Removes HTML tags from a translated description string.
+ *
+ * @param {string} html HTML string.
+ * @return {string} Plain text.
+ */
+export function stripTags( html ) {
+	return String( html ?? '' ).replace( /<[^>]*>/g, '' );
+}
+
+/**
+ * Builds the SelectControl option list for the Axeptio cookies-version field
+ * from the versions fetched from the Axeptio project, keeping the currently
+ * saved value representable even when the fetch fails or the version was
+ * removed from the project (so a save never silently drops it).
+ *
+ * @param {Array}  cookies          The `cookies` array of the Axeptio project JSON.
+ * @param {string} currentValue     The currently saved cookies version.
+ * @param {string} placeholderLabel Label of the leading empty option, shown only
+ *                                  when no version is selected yet.
+ * @return {Array} `{ value, label }` options for `SelectControl`.
+ */
+export function axeptioVersionOptions(
+	cookies,
+	currentValue,
+	placeholderLabel
+) {
+	const current = String( currentValue ?? '' );
+	const list = Array.isArray( cookies ) ? cookies : [];
+	const options = [];
+	const names = new Set();
+
+	// A leading empty option so an unset value stays representable.
+	if ( '' === current ) {
+		options.push( { value: '', label: placeholderLabel ?? '' } );
+	}
+
+	list.forEach( ( cookie ) => {
+		if ( ! cookie || ! cookie.name ) {
+			return;
+		}
+
+		const name = String( cookie.name );
+		if ( names.has( name ) ) {
+			return;
+		}
+
+		names.add( name );
+		options.push( {
+			value: name,
+			label: String( cookie.title || cookie.name ),
+		} );
+	} );
+
+	// Preserve a saved value that is no longer published (or that could not be
+	// loaded) so submitting the form does not wipe it.
+	if ( '' !== current && ! names.has( current ) ) {
+		options.push( { value: current, label: current } );
+	}
+
+	return options;
+}

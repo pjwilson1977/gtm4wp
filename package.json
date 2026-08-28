@@ -1,10 +1,15 @@
 {
   "name": "gtm4wp",
-  "version": "1.17.0",
+  "version": "2.0.0-rc1",
   "description": "The first Google Tag Manager plugin for WordPress with business goals in mind",
-  "main": "index.js",
   "scripts": {
-    "build": "gulp"
+    "build": "wp-scripts build",
+    "postbuild": "npm run lint:js",
+    "start": "wp-scripts start",
+    "test:unit": "wp-scripts test-unit-js --passWithNoTests",
+    "lint:js": "wp-scripts lint-js js",
+    "release": "node tools/build-release.js",
+    "check-branch": "node tools/check-branch.js"
   },
   "repository": {
     "type": "git",
@@ -21,11 +26,27 @@
   },
   "homepage": "https://github.com/duracelltomi/gtm4wp#readme",
   "devDependencies": {
-    "@babel/core": "^7.21.4",
-    "@babel/preset-env": "^7.22.20",
-    "gulp": "^5.0.0",
-    "gulp-babel": "^8.0.0",
-    "gulp-clean-dir": "^1.0.2",
-    "gulp-uglify": "^3.0.2"
+    "@testing-library/jest-dom": "^7.0.0",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.3",
+    "@wordpress/scripts": "^30.0.0",
+    "adm-zip": "^0.6.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "typescript": "~5.3.3"
+  },
+  "overrides": {
+    "@babel/core": "^7.29.6",
+    "@babel/plugin-transform-modules-systemjs": "^7.29.4",
+    "@opentelemetry/core": "^2.8.0",
+    "adm-zip": "^0.6.0",
+    "brace-expansion": "^5.0.8",
+    "linkify-it": "^5.0.2",
+    "markdown-it": "^14.2.0",
+    "minimatch": "^10.0.3",
+    "puppeteer-core": "^25.0.0",
+    "serialize-javascript": "^7.0.5",
+    "uuid": "^11.1.1",
+    "webpack-dev-server": "^6.0.0"
   }
 }

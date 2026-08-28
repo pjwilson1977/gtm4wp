@@ -1,25 +1,170 @@
 <?xml version="1.0"?>
-<ruleset name="WordPress Coding Standards for Plugins">
-	<description>Generally-applicable sniffs for WordPress plugins and theme development</description>
+<ruleset name="WordPress Coding Standards for GTM4WP">
+	<description>WordPress coding standards for the GTM4WP plugin (2.x, OOP)</description>
 
-  <!-- Default Rules -->
+	<file>duracelltomi-google-tag-manager-for-wordpress.php</file>
+	<file>uninstall.php</file>
+	<file>compat</file>
+	<file>src</file>
+	<file>tests</file>
+
+	<!-- Default Rules -->
 	<rule ref="WordPress" />
 	<rule ref="WordPress-Core" />
 	<rule ref="WordPress-Extra" />
 	<rule ref="PHPCompatibility" />
 
+	<!--
+	Both sniffs below are pulled in by WordPress-Core / WordPress-Extra but return
+	early when their property is unset: I18nSniff bails on an empty text_domain,
+	PrefixAllGlobalsSniff bails on empty prefixes. Enabled-but-inert reads as
+	coverage in a green build, which is worse than no check at all - the build
+	passes because the check is switched off, not because the code is right.
+	-->
+	<rule ref="WordPress.WP.I18n">
+		<properties>
+			<property name="text_domain" type="array">
+				<element value="duracelltomi-google-tag-manager"/>
+			</property>
+		</properties>
+	</rule>
+
+	<rule ref="WordPress.NamingConventions.PrefixAllGlobals">
+		<properties>
+			<property name="prefixes" type="array">
+				<element value="gtm4wp"/>
+				<!--
+				The three legacy globals in the main plugin file are spelled
+				gtp4wp_ - a 1.x typo, not a second namespace. Nothing inside this
+				repo reads them; only third-party 1.x consumers do, which is why
+				correcting the typo was never worth a public API change.
+
+				Deprecated in 2.0 and scheduled for removal in 2.1, with no date
+				set. When they go, delete this element and this comment with them.
+				-->
+				<element value="gtp4wp"/>
+			</property>
+		</properties>
+
+		<!--
+		The hook-name half of this sniff cannot reach a true positive here, so both
+		of its codes come off. Every hook GTM4WP defines is invoked through a
+		constant - the GTM4WP_WPFILTER_* / GTM4WP_WPACTION_* set in
+		compat/constants.php and the FILTER_* class constants - and the sniff
+		cannot resolve a constant to its string value, so our own correctly
+		prefixed hooks land in DynamicHooknameFound unread (self::FILTER_AMP_RUNNING
+		really is 'gtm4wp_amp_running'). What NonPrefixedHooknameFound sees is the
+		core and WooCommerce hooks we deliberately re-fire (the_permalink,
+		woocommerce_cart_item_product, woocommerce_thankyou_order_id,
+		wpml_current_language, ...), where the whole point is to match the name a
+		third party already listens on - prefixing those would break the
+		integration. The variable, constant, function, class and namespace halves
+		stay on; those do reach real findings.
+		-->
+		<exclude name="WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound"/>
+		<exclude name="WordPress.NamingConventions.PrefixAllGlobals.DynamicHooknameFound"/>
+
+		<!--
+		Tests: the stubs deliberately mirror WordPress and WooCommerce names
+		exactly - ABSPATH, DAY_IN_SECONDS, WP_UNINSTALL_PLUGIN, $product, the
+		Automattic\WooCommerce\Admin\API\... namespace. A test double that
+		renamed the thing it stands in for would stop standing in for it.
+		-->
+		<exclude-pattern>*/tests/*</exclude-pattern>
+	</rule>
+
+	<!--
+	The functions wordpress.org's plugin review rejects outright. None of these has
+	ever appeared here, so this is a guard against future code rather than a fix -
+	its value is that a reviewer-blocking construct fails `composer phpcs` locally
+	instead of surfacing weeks later in a directory review.
+	-->
+	<rule ref="Generic.PHP.ForbiddenFunctions">
+		<properties>
+			<property name="forbiddenFunctions" type="array">
+				<element key="eval" value="null"/>
+				<element key="create_function" value="null"/>
+				<element key="proc_open" value="null"/>
+				<element key="passthru" value="null"/>
+				<element key="move_uploaded_file" value="null"/>
+				<element key="str_rot13" value="null"/>
+			</property>
+		</properties>
+	</rule>
+
 	<!-- Exclude Common Paths. -->
 	<exclude-pattern>*/wptest/*</exclude-pattern>
 	<exclude-pattern>*/node_modules/*</exclude-pattern>
 	<exclude-pattern>*/vendor/*</exclude-pattern>
-	<exclude-pattern>*/integration/whichbrowser/*</exclude-pattern>
-  <exclude-pattern>*/PHPCompatibility/Tests/Keywords/ForbiddenNames/*\.php</exclude-pattern>
-  <exclude-pattern>*/vendor/*</exclude-pattern>
-  <exclude-pattern>*/spec/*</exclude-pattern>
-  <exclude-pattern>*/wpcs/*</exclude-pattern>
+	<exclude-pattern>*/build/*</exclude-pattern>
 
-  <!-- Check up to 8 files simultanously. -->
-  <arg name="parallel" value="8"/>
+	<!-- PSR-4 class files: file and class naming follows PSR-4, not WPCS file naming. -->
+	<rule ref="WordPress.Files.FileName">
+		<exclude-pattern>*/src/*</exclude-pattern>
+		<exclude-pattern>*/tests/*</exclude-pattern>
+	</rule>
+	<rule ref="PEAR.NamingConventions.ValidClassName">
+		<exclude-pattern>*/src/*</exclude-pattern>
+		<exclude-pattern>*/tests/*</exclude-pattern>
+	</rule>
 
-  <config name="testVersion" value="7.0-"/>
+	<!-- Tests: allow PHPUnit conventions (snake_case-free method names, no per-test doc blocks). -->
+	<rule ref="WordPress.NamingConventions.ValidFunctionName">
+		<exclude-pattern>*/tests/*</exclude-pattern>
+	</rule>
+	<rule ref="Squiz.Commenting.FunctionComment">
+		<exclude-pattern>*/tests/*</exclude-pattern>
+	</rule>
+	<rule ref="Squiz.Commenting.FileComment">
+		<exclude-pattern>*/tests/*</exclude-pattern>
+	</rule>
+	<rule ref="Squiz.Commenting.ClassComment">
+		<exclude-pattern>*/tests/*</exclude-pattern>
+	</rule>
+	<rule ref="Squiz.Commenting.VariableComment">
+		<exclude-pattern>*/tests/*</exclude-pattern>
+	</rule>
+
+	<rule ref="WordPress.WP.GlobalVariablesOverride">
+		<exclude-pattern>*/tests/*</exclude-pattern>
+	</rule>
+
+	<!--
+	Tests: stubs and mock callbacks must match the arity of the WordPress function they
+	stand in for (wp_kses, wp_enqueue_script, update_option, add_submenu_page, ...), so a
+	trailing parameter the stub does not read is required, not dead code. Dropping it
+	would break the call it exists to intercept.
+	-->
+	<rule ref="Generic.CodeAnalysis.UnusedFunctionParameter">
+		<exclude-pattern>*/tests/*</exclude-pattern>
+	</rule>
+
+	<!-- Legacy 1.x test files, absorbed into tests/unit in later phases. -->
+	<exclude-pattern>*/tests/test-*.php</exclude-pattern>
+
+	<!-- Check up to 8 files simultaneously. -->
+	<arg name="parallel" value="8"/>
+	<arg name="extensions" value="php"/>
+
+	<config name="testVersion" value="8.0-"/>
+	<config name="minimum_wp_version" value="6.3"/>
+
+	<!--
+	Warnings fail the build alongside errors. They were previously ignored on exit, which
+	meant CI printed WPCS warnings for years and exited 0 - a whole array's double-arrow
+	alignment silently drifted that way. Everything the WordPress standard raises here is
+	either auto-fixable by phpcbf or worth a deliberate exclude-pattern above, so there is
+	no standing warning backlog for this to trip over.
+
+	Set explicitly rather than left to PHP_CodeSniffer's default. 2026-08-04 fixed this by
+	DELETING an `ignore_warnings_on_exit value="1"` line, which restored the default and
+	made the behavior correct but unpinned - and the only record of the intent was the
+	paragraph above, which enforces nothing. The `config-set` subcommand writes
+	`ignore_warnings_on_exit` into vendor/squizlabs/php_codesniffer/CodeSniffer.conf, which
+	is git-ignored, so setting it there would silently turn local runs green again and
+	appear in no diff. Measured: with that value set, a ruleset without this line exits 0 on
+	a warnings-only file and a ruleset with it exits 1. A ruleset config element is applied
+	after the config file is read, so this one wins.
+	-->
+	<config name="ignore_warnings_on_exit" value="0"/>
 </ruleset>

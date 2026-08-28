@@ -25,11 +25,47 @@ clover.xml
 /wordpress/
 
 # Composer
+# Only /vendor/ is a build artifact. composer.lock is source: it is what makes
+# `composer install` reproducible, and without it CI resolves a fresh dependency
+# set on every run - including Composer plugins, which execute code at install
+# time. Committed deliberately; see .upstream/ entry U88.
 /vendor/
-composer.lock
 
 # NPM
 node_modules
+npm-debug.log*
+yarn-error.log
 
-# LLM
-.claude/
+# Python (skill helper scripts)
+__pycache__/
+
+# Build output
+/build/
+/release/
+.phpunit.result.cache
+
+# LLM: project instructions and skills are committed,
+# personal permission settings are not.
+.claude/settings.json
+.claude/settings.local.json
+
+# Scratch git worktrees created by /code-review's adjudication stage, which runs
+# any verifier that patches files in isolation. Ignored because that stage also
+# tells the run to confirm `git status --porcelain` is empty before writing its
+# report - so without this line the isolation mechanism trips its own integrity
+# check every time a verifier is live.
+.claude/worktrees/
+
+# wordpress.org support-forum triage (/wporg-forum-review). The framework lives
+# in .claude/ and is committed; the working data — triage ledger, canonical
+# answers, per-run reports and drafted replies — is local only.
+.support/
+
+# Shared voice definition for drafted support replies (both /wporg-forum-review
+# and /issue-review). Local only: it quotes the maintainer's own writing and
+# describes how to match it, which is not something to publish.
+.claude/MAINTAINER-VOICE.md
+
+.docs/
+
+.roadmap/
